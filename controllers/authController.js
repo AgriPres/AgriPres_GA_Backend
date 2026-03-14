@@ -6,6 +6,10 @@ const pool = require('../db/config');
 const login = async (req, res) => {
   const { username, password } = req.body;
 
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Debes enviar username y password' });
+  }
+
   try {
     // 1. Buscar si el usuario existe en la base de datos
     const userQuery = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
@@ -15,9 +19,13 @@ const login = async (req, res) => {
     }
 
     const user = userQuery.rows[0];
+    const isAdmin = user.username === 'admin';
 
-    // 2. Comparar la contraseña enviada con la contraseña encriptada de la DB
-    const validPassword = await bcrypt.compare(password, user.password);
+    // 2. Comparar contraseña: soporta hash bcrypt o texto plano legado
+    const looksLikeBcrypt = typeof user.password === 'string' && user.password.startsWith('$2');
+    const validPassword = looksLikeBcrypt
+      ? await bcrypt.compare(password, user.password)
+      : password === user.password;
 
     if (!validPassword) {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
@@ -25,7 +33,7 @@ const login = async (req, res) => {
 
     // 3. Si todo es correcto, crear el Token JWT
     const token = jwt.sign(
-      { id: user.id, username: user.username },
+      { id: user.id, username: user.username, isAdmin },
       process.env.JWT_SECRET,
       { expiresIn: '2h' } // El token expira en 2 horas
     );
@@ -34,7 +42,7 @@ const login = async (req, res) => {
     res.json({
       message: 'Inicio de sesión exitoso',
       token: token,
-      user: { id: user.id, username: user.username }
+      user: { id: user.id, username: user.username, isAdmin }
     });
 
   } catch (error) {
